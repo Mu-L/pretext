@@ -33,15 +33,17 @@ const { height, lineCount } = layout(block, containerWidth, 19)
 
 ## Performance
 
+Measured on a MacBook Pro (Apple M2 Pro, 12 CPU cores, 16 GB RAM, macOS 26.3, arm64).
+
 500 comments, resize to a new width (the hot path):
 
-| Approach | Time | DOM-free |
-|---|---|---|
-| **pretext** | **0.11ms** | Yes |
-| DOM batch (write all, read all) | 0.18ms | No |
-| DOM interleaved (per-component) | varies, much worse in practice | No |
-| Sebastian's text-layout (no cache) | 30ms | Yes |
-| Sebastian's + word cache | 3ms | Yes |
+| Browser | prepare() | layout() | DOM batch | DOM interleaved |
+|---|---|---|---|---|
+| Chrome | 29.80ms | **0.03ms** | 4.00ms | 41.80ms |
+| Firefox | 15.00ms | **0.06ms** | 11.00ms | 79.00ms |
+| Safari | 16.00ms | **0.04ms** | 80.00ms | 142.50ms |
+
+`prepare()` is the one-time setup cost when text first appears. `layout()` is the resize hot path and stays comfortably sub-0.1ms per 500-text batch on this workload. See [pages/benchmark-results.txt](pages/benchmark-results.txt) for the checked-in snapshot and [pages/benchmark.ts](pages/benchmark.ts) for the live benchmark harness.
 
 ## Accuracy
 

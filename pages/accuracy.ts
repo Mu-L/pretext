@@ -29,6 +29,7 @@ type Mismatch = {
 type AccuracyReport = {
   status: 'ready' | 'error'
   requestId?: string
+  environment?: EnvironmentFingerprint
   total?: number
   matchCount?: number
   mismatchCount?: number
@@ -37,6 +38,26 @@ type AccuracyReport = {
 }
 
 type AccuracyNavigationReport = AccuracyReport
+
+type EnvironmentFingerprint = {
+  userAgent: string
+  devicePixelRatio: number
+  viewport: {
+    innerWidth: number
+    innerHeight: number
+    outerWidth: number
+    outerHeight: number
+    visualViewportScale: number | null
+  }
+  screen: {
+    width: number
+    height: number
+    availWidth: number
+    availHeight: number
+    colorDepth: number
+    pixelDepth: number
+  }
+}
 
 declare global {
   interface Window {
@@ -56,6 +77,28 @@ document.body.appendChild(reportEl)
 
 function withRequestId<T extends AccuracyReport>(report: T): AccuracyReport {
   return requestId === undefined ? report : { ...report, requestId }
+}
+
+function getEnvironmentFingerprint(): EnvironmentFingerprint {
+  return {
+    userAgent: navigator.userAgent,
+    devicePixelRatio: window.devicePixelRatio,
+    viewport: {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      visualViewportScale: window.visualViewport?.scale ?? null,
+    },
+    screen: {
+      width: window.screen.width,
+      height: window.screen.height,
+      availWidth: window.screen.availWidth,
+      availHeight: window.screen.availHeight,
+      colorDepth: window.screen.colorDepth,
+      pixelDepth: window.screen.pixelDepth,
+    },
+  }
 }
 
 function publishReport(report: AccuracyReport): void {
@@ -284,6 +327,7 @@ function render() {
       root.innerHTML = html
       publishReport(withRequestId({
         status: 'ready',
+        environment: getEnvironmentFingerprint(),
         total,
         matchCount,
         mismatchCount: mismatches.length,

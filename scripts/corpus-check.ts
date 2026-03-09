@@ -18,6 +18,25 @@ type CorpusMeta = {
 type CorpusReport = {
   status: 'ready' | 'error'
   requestId?: string
+  environment?: {
+    userAgent: string
+    devicePixelRatio: number
+    viewport: {
+      innerWidth: number
+      innerHeight: number
+      outerWidth: number
+      outerHeight: number
+      visualViewportScale: number | null
+    }
+    screen: {
+      width: number
+      height: number
+      availWidth: number
+      availHeight: number
+      colorDepth: number
+      pixelDepth: number
+    }
+  }
   corpusId?: string
   title?: string
   width?: number
@@ -26,6 +45,8 @@ type CorpusReport = {
   diffPx?: number
   predictedLineCount?: number
   browserLineCount?: number
+  probeHeight?: number
+  normalizedHeight?: number
   mismatchCount?: number
   firstMismatch?: {
     line: number
@@ -125,6 +146,17 @@ function printReport(report: CorpusReport): void {
   )
   if (report.maxLineWidthDrift !== undefined) {
     console.log(`  max line width drift: ${report.maxLineWidthDrift.toFixed(3)}px`)
+  }
+  if (report.environment !== undefined) {
+    const env = report.environment
+    console.log(
+      `  env: dpr ${env.devicePixelRatio} | viewport ${env.viewport.innerWidth}x${env.viewport.innerHeight} | outer ${env.viewport.outerWidth}x${env.viewport.outerHeight} | scale ${env.viewport.visualViewportScale ?? '-'} | screen ${env.screen.width}x${env.screen.height}`,
+    )
+  }
+  if (report.probeHeight !== undefined || report.normalizedHeight !== undefined) {
+    console.log(
+      `  probe heights: probe ${Math.round(report.probeHeight ?? 0)}px | normalized ${Math.round(report.normalizedHeight ?? 0)}px | book ${actual}px`,
+    )
   }
   if (report.maxDriftLine !== null && report.maxDriftLine !== undefined) {
     console.log(

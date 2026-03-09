@@ -26,6 +26,7 @@ type CorpusMeta = {
 type CorpusReport = {
   status: 'ready' | 'error'
   requestId?: string
+  environment?: EnvironmentFingerprint
   corpusId?: string
   title?: string
   language?: string
@@ -39,6 +40,8 @@ type CorpusReport = {
   diffPx?: number
   predictedLineCount?: number
   browserLineCount?: number
+  probeHeight?: number
+  normalizedHeight?: number
   mismatchCount?: number
   firstMismatch?: CorpusLineMismatch | null
   firstBreakMismatch?: CorpusBreakMismatch | null
@@ -94,6 +97,26 @@ type DiagnosticUnit = {
   text: string
   start: number
   end: number
+}
+
+type EnvironmentFingerprint = {
+  userAgent: string
+  devicePixelRatio: number
+  viewport: {
+    innerWidth: number
+    innerHeight: number
+    outerWidth: number
+    outerHeight: number
+    visualViewportScale: number | null
+  }
+  screen: {
+    width: number
+    height: number
+    availWidth: number
+    availHeight: number
+    colorDepth: number
+    pixelDepth: number
+  }
 }
 
 declare global {
@@ -173,6 +196,28 @@ function withRequestId<T extends CorpusReport>(report: T): CorpusReport {
   return requestId === undefined ? report : { ...report, requestId }
 }
 
+function getEnvironmentFingerprint(): EnvironmentFingerprint {
+  return {
+    userAgent: navigator.userAgent,
+    devicePixelRatio: window.devicePixelRatio,
+    viewport: {
+      innerWidth: window.innerWidth,
+      innerHeight: window.innerHeight,
+      outerWidth: window.outerWidth,
+      outerHeight: window.outerHeight,
+      visualViewportScale: window.visualViewport?.scale ?? null,
+    },
+    screen: {
+      width: window.screen.width,
+      height: window.screen.height,
+      availWidth: window.screen.availWidth,
+      availHeight: window.screen.availHeight,
+      colorDepth: window.screen.colorDepth,
+      pixelDepth: window.screen.pixelDepth,
+    },
+  }
+}
+
 function publishNavigationReport(report: CorpusReport): void {
   const encoded = encodeURIComponent(JSON.stringify(report))
   history.replaceState(null, '', `${location.pathname}${location.search}#report=${encoded}`)
@@ -243,7 +288,7 @@ function getBrowserLines(
   div: HTMLDivElement,
   normalizedText: string,
   font: string,
-): DiagnosticLine[] {
+): { lines: DiagnosticLine[], height: number } {
   const units = getDiagnosticUnits(prepared)
   const browserLines: DiagnosticLine[] = []
   const spans: HTMLSpanElement[] = []
@@ -297,8 +342,9 @@ function getBrowserLines(
   }
 
   pushBrowserLine()
+  const height = div.getBoundingClientRect().height
   div.textContent = ''
-  return browserLines
+  return { lines: browserLines, height }
 }
 
 function measureDomTextWidth(text: string, font: string, direction: string): number {
@@ -544,6 +590,7 @@ function buildReadyReport(
 ): CorpusReport {
   return withRequestId({
     status: 'ready',
+    environment: getEnvironmentFingerprint(),
     corpusId: meta.id,
     title: meta.title,
     language: meta.language,
@@ -574,7 +621,10 @@ function addDiagnostics(
   }
 
   const ourLines = getOurLines(prepared, normalizedText, contentWidth, lineHeight, font)
-  const browserLines = getBrowserLines(prepared, lineProbeDiv, normalizedText, font)
+  const browserResult = getBrowserLines(prepared, lineProbeDiv, normalizedText, font)
+  const browserLines = browserResult.lines
+  const probeHeight = browserResult.height
+  const normalizedHeight = diagnosticDiv.getBoundingClientRect().height
 
   let mismatchCount = 0
   let firstMismatch: CorpusLineMismatch | null = null
@@ -613,6 +663,8 @@ function addDiagnostics(
     ...report,
     predictedLineCount: ourLines.length,
     browserLineCount: browserLines.length,
+    probeHeight,
+    normalizedHeight,
     mismatchCount,
     firstMismatch,
     firstBreakMismatch: getFirstBreakMismatch(normalizedText, contentWidth, ourLines, browserLines, font, direction),

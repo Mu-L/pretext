@@ -63,8 +63,18 @@ function measureSegment(seg: string, cache: Map<string, number>): number {
   return w
 }
 
-function getLineFitEpsilon(): number {
-  if (typeof navigator === 'undefined') return 0.002
+type EngineProfile = {
+  lineFitEpsilon: number
+  carryCJKAfterClosingQuote: boolean
+}
+
+function getEngineProfile(): EngineProfile {
+  if (typeof navigator === 'undefined') {
+    return {
+      lineFitEpsilon: 0.002,
+      carryCJKAfterClosingQuote: false,
+    }
+  }
 
   const ua = navigator.userAgent
   const vendor = navigator.vendor
@@ -76,12 +86,23 @@ function getLineFitEpsilon(): number {
     !ua.includes('CriOS/') &&
     !ua.includes('FxiOS/') &&
     !ua.includes('EdgiOS/')
+  const isChromium =
+    ua.includes('Chrome/') ||
+    ua.includes('Chromium/') ||
+    ua.includes('CriOS/') ||
+    ua.includes('Edg/')
 
-  // WebKit is slightly more permissive than Chromium/Gecko at the line edge.
-  return isSafari ? 1 / 64 : 0.002
+  return {
+    // WebKit is slightly more permissive than Chromium/Gecko at the line edge.
+    lineFitEpsilon: isSafari ? 1 / 64 : 0.002,
+    // Chromium tends to keep Hangul that follows a closing quote cluster on the
+    // next line, e.g. `어.”라고`, even when the shorter `어.”` would fit.
+    carryCJKAfterClosingQuote: isChromium,
+  }
 }
 
-const lineFitEpsilon = getLineFitEpsilon()
+const engineProfile = getEngineProfile()
+const lineFitEpsilon = engineProfile.lineFitEpsilon
 
 function parseFontSize(font: string): number {
   const m = font.match(/(\d+(?:\.\d+)?)\s*px/)
@@ -266,6 +287,17 @@ const leftStickyPunctuation = new Set([
   '…',
 ])
 
+const closingQuoteChars = new Set([
+  '”', '’', '»', '›',
+  '\u300D', // 」
+  '\u300F', // 』
+  '\u3011', // 】
+  '\u300B', // 》
+  '\u3009', // 〉
+  '\u3015', // 〕
+  '\uFF09', // ）
+])
+
 function isLeftStickyPunctuationSegment(segment: string): boolean {
   for (const ch of segment) {
     if (!leftStickyPunctuation.has(ch)) return false
@@ -293,6 +325,15 @@ function isRepeatedSingleCharRun(segment: string, ch: string): boolean {
     if (part !== ch) return false
   }
   return true
+}
+
+function endsWithClosingQuote(text: string): boolean {
+  for (let i = text.length - 1; i >= 0; i--) {
+    const ch = text[i]!
+    if (closingQuoteChars.has(ch)) return true
+    if (!leftStickyPunctuation.has(ch)) return false
+  }
+  return false
 }
 
 // Unicode Bidirectional Algorithm (UAX #9), forked from pdf.js via Sebastian's
@@ -444,6 +485,17 @@ function buildMergedSegmentation(normalized: string): MergedSegmentation {
     const ws = !s.isWordLike && isWhitespace(s.segment)
 
     if (
+      engineProfile.carryCJKAfterClosingQuote &&
+      !ws &&
+      mergedLen > 0 &&
+      !mergedSpace[mergedLen - 1]! &&
+      isCJK(s.segment) &&
+      isCJK(mergedTexts[mergedLen - 1]!) &&
+      endsWithClosingQuote(mergedTexts[mergedLen - 1]!)
+    ) {
+      mergedTexts[mergedLen - 1] += s.segment
+      mergedWordLike[mergedLen - 1] = mergedWordLike[mergedLen - 1]! || (s.isWordLike ?? false)
+    } else if (
       !s.isWordLike &&
       !ws &&
       mergedLen > 0 &&
@@ -631,7 +683,10 @@ function measureAnalysis(
         if (
           kinsokuEnd.has(unitText) ||
           kinsokuStart.has(grapheme) ||
-          leftStickyPunctuation.has(grapheme)
+          leftStickyPunctuation.has(grapheme) ||
+          (engineProfile.carryCJKAfterClosingQuote &&
+            isCJK(grapheme) &&
+            endsWithClosingQuote(unitText))
         ) {
           unitText += grapheme
           continue

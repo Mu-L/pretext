@@ -20,6 +20,25 @@ type AccuracyMismatch = {
 type AccuracyReport = {
   status: 'ready' | 'error'
   requestId?: string
+  environment?: {
+    userAgent: string
+    devicePixelRatio: number
+    viewport: {
+      innerWidth: number
+      innerHeight: number
+      outerWidth: number
+      outerHeight: number
+      visualViewportScale: number | null
+    }
+    screen: {
+      width: number
+      height: number
+      availWidth: number
+      availHeight: number
+      colorDepth: number
+      pixelDepth: number
+    }
+  }
   total?: number
   matchCount?: number
   mismatchCount?: number
@@ -331,6 +350,12 @@ function printReport(report: AccuracyReport): void {
   const mismatchCount = report.mismatchCount ?? 0
   const pct = total > 0 ? ((matchCount / total) * 100).toFixed(2) : '0.00'
   console.log(`${matchCount}/${total} match (${pct}%) | ${mismatchCount} mismatches`)
+  if (report.environment !== undefined) {
+    const env = report.environment
+    console.log(
+      `env: dpr ${env.devicePixelRatio} | viewport ${env.viewport.innerWidth}x${env.viewport.innerHeight} | outer ${env.viewport.outerWidth}x${env.viewport.outerHeight} | scale ${env.viewport.visualViewportScale ?? '-'} | screen ${env.screen.width}x${env.screen.height}`,
+    )
+  }
 
   for (const [index, mismatch] of (report.mismatches ?? []).entries()) {
     console.log(

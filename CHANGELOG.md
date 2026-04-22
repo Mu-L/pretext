@@ -4,7 +4,7 @@
 
 ### Added
 
-- Numeric CSS-pixel `letterSpacing` support on `prepare()`, `prepareWithSegments()`, and rich-inline items (#108, #156).
+- Numeric CSS-pixel `letterSpacing` support on `prepare()`, `prepareWithSegments()`, and each existing rich-inline item (#108, #156).
 
 ### Fixed
 

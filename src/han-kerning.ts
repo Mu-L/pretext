@@ -19,6 +19,7 @@
 // Canvas once per font: in `cc` HanKerning halts exactly one of the two, so a character's trim
 // is 2 W(c) - W(cc), and the types of dots, colons, semicolons and quotes follow their ink
 // bounds under the page's Han script (han_kerning.cc:47-168, 400-535).
+import type { TextAnalysis } from './analysis.js'
 import { getSegmentMetrics, type FontMeasurement } from './measurement.js'
 
 const OTHER = 0
@@ -181,29 +182,21 @@ export type HanKerningTrims = {
   lineEndTrims: number[] | null
 }
 
-// The trims of text segments, given each segment's text, the characters before and after it
-// (-1 at the paragraph's ends), and whether a break directly follows it.
-export function getHanKerningTrims(
-  measurement: FontMeasurement,
-  texts: readonly string[],
-  isText: (index: number) => boolean,
-  previousCode: (index: number) => number,
-  nextCode: (index: number) => number,
-  breaksAfterEnd: (index: number) => boolean,
-): HanKerningTrims {
+// The trims of an analysis' text segments, read from the characters before and after each.
+export function getHanKerningTrims(measurement: FontMeasurement, analysis: TextAnalysis): HanKerningTrims {
   const out: HanKerningTrims = { widthTrims: null, lineStartExtras: null, lineEndTrims: null }
   const data = getFontData(measurement)
   if (data === null) return out
+  const { texts, kinds, starts, normalized, breaksBefore } = analysis
   const addWidthTrim = (i: number, trim: number): void => {
     out.widthTrims ??= Array.from({ length: texts.length }, () => 0)
     out.widthTrims[i] = out.widthTrims[i]! + trim
   }
   for (let i = 0; i < texts.length; i++) {
-    if (!isText(i)) continue
+    if (kinds[i] !== 'text') continue
     const text = texts[i]!
     const first = text.charCodeAt(0)
-    const previous = previousCode(i)
-    if (previous >= 0 && maybeHanKerns(first) && haltedSide(getCharType(data, previous), getCharType(data, first)) === 1) {
+    if (i > 0 && maybeHanKerns(first) && haltedSide(getCharType(data, normalized.charCodeAt(starts[i]! - 1)), getCharType(data, first)) === 1) {
       const trim = getTrim(data, first, measurement)
       out.lineStartExtras ??= Array.from({ length: texts.length }, () => 0)
       out.lineStartExtras[i] = trim
@@ -219,8 +212,8 @@ export function getHanKerningTrims(
     const last = text.charCodeAt(text.length - 1)
     if (!maybeHanKerns(last)) continue
     // The text after it halts a closing mark wherever the line ends.
-    const next = nextCode(i)
-    if (next >= 0 && haltedSide(getCharType(data, last), getCharType(data, next)) === -1) {
+    const atEnd = i + 1 === texts.length
+    if (!atEnd && haltedSide(getCharType(data, last), getCharType(data, normalized.charCodeAt(starts[i + 1]!))) === -1) {
       addWidthTrim(i, getTrim(data, last, measurement))
       continue
     }
@@ -228,7 +221,9 @@ export function getHanKerningTrims(
     // halts the character whatever the font types it (han_kerning.cc:284-285, 312-313); the
     // port asks for a closing type, since only then does 2 W(c) - W(cc) measure the halt.
     const lastType = getStaticCharType(last)
-    if ((lastType === CLOSE || lastType === CLOSE_QUOTE) && getCharType(data, last) === CLOSE && breaksAfterEnd(i)) {
+    // A break directly after the segment: text after a break, or the end of the text.
+    if ((lastType === CLOSE || lastType === CLOSE_QUOTE) && getCharType(data, last) === CLOSE &&
+      (atEnd || (kinds[i + 1] === 'text' && breaksBefore?.[i + 1] !== false))) {
       out.lineEndTrims ??= Array.from({ length: texts.length }, () => 0)
       out.lineEndTrims[i] = getTrim(data, last, measurement)
     }

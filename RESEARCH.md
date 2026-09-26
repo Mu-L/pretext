@@ -1379,7 +1379,20 @@ and Chrome 154's `prepare()` took 0.4 to 2.6% more time than main on most bench
 rows in every session, 1.8% on seen Arabic and 2.6% on letter-spaced CJK, while
 Firefox and Safari didn't move. With the loop apart, `getMarkContext()` takes 376
 bytes and is inlined again, and every Chrome row reads within noise: seen Arabic
-−0.2% and letter-spaced CJK +0.6% (#351).
+−0.2% and letter-spaced CJK +0.6% (#351). With `measureAnalysis()` as one switch
+over the segment kinds, it still takes 376 bytes. V8's first optimized compile of
+`measureAnalysis()` leaves it out, as the loop's direct calls use the budget first,
+and the later ones, which the loop keeps running, inline it.
+
+That loop measures a text segment's width in `getTextSegmentWidth()`, apart from
+it. With the sum inline, JavaScriptCore's DFG tier (Safari 27, and macOS 27's
+`jsc`) failed a type check at the add of the following-space kerning on nearly
+every segment of CJK text, 25,508 times in 80 passes over the letter-spaced CJK
+shape, recompiled the loop seven times and never compiled it with its FTL tier.
+Safari prepared the bench's letter-spaced CJK 45% and keep-all CJK brackets 59%
+slower than main in both sessions. With the sum in a function of its own, which
+JavaScriptCore inlines, the loop reaches the FTL with no such exit, as main's did,
+and Safari prepares the two shapes 9% and 10% faster than main.
 
 Rich-inline's line stepper keeps three checks that change no result: an early
 return the loop repeats at the end of every walk, a line-start test before

@@ -20,19 +20,22 @@ import {
 import {
   type BreakableFitMode,
   type EngineProfile,
+  type FontMeasurement,
   clearMeasurementCaches,
   getCorrectedSegmentWidth,
-  getDocumentLanguage,
-  getSegmentBreakableFitAdvances,
   getEngineProfile,
   getEmojiCorrection,
   getFollowingSpaceMetrics,
   getFontMeasurement,
+  getPreparationLanguage,
+  getSegmentFit,
   getSegmentMetrics,
+  getTextWidth,
   measureWithLetterSpacing,
   readLetterSpacing,
   setLocaleLanguage,
   textMayContainEmoji,
+  type SegmentFit,
   type SegmentMetrics,
 } from './measurement.js'
 import {
@@ -187,17 +190,15 @@ function measureAnalysis(
   includeSegments: boolean,
   letterSpacing: number,
   engineProfile: EngineProfile,
-  documentLanguage: string | null,
+  language: string | null,
 ): InternalPreparedText | PreparedTextWithSegments {
-  const fontMeasurement = getFontMeasurement(font, documentLanguage)
-  const cache = fontMeasurement.metrics
+  const fontMeasurement = getFontMeasurement(font, language)
   const emojiCorrection = textMayContainEmoji(analysis.normalized) ? getEmojiCorrection(font, fontMeasurement) : 0
   // The gap before the hyphen, plus the hyphen's own spacing where the engine
   // letter-spaces it.
-  const discretionaryHyphenWidth =
-    getCorrectedSegmentWidth('-', getSegmentMetrics('-', cache), emojiCorrection) +
+  const discretionaryHyphenWidth = getTextWidth('-', fontMeasurement, emojiCorrection) +
     (letterSpacing === 0 ? 0 : letterSpacing * (engineProfile.letterSpaceDiscretionaryHyphen ? 2 : 1))
-  const spaceWidth = getCorrectedSegmentWidth(' ', getSegmentMetrics(' ', cache), emojiCorrection)
+  const spaceWidth = getTextWidth(' ', fontMeasurement, emojiCorrection)
   const tabStopAdvance = spaceWidth * 8
   const hasLetterSpacing = letterSpacing !== 0
 
@@ -236,14 +237,13 @@ function measureAnalysis(
   // instead of alone, so its kerned width costs no extra Canvas call. Other
   // occurrences of the same text measure it alone.
   function getTextMetrics(text: string, followingSpaceTail: string | null): SegmentMetrics {
-    if (followingSpaceTail !== '') return getSegmentMetrics(text, cache)
-    return getFollowingSpaceMetrics(text, fontMeasurement.followingSpaceMetrics)
+    return followingSpaceTail === '' ? getFollowingSpaceMetrics(text, fontMeasurement) : getSegmentMetrics(text, fontMeasurement)
   }
 
   // A zero-width break before the space ends the measured item, so only the
   // item's kerning with the space is added to the text's own width.
   function getTailKerning(item: string): number {
-    return getFollowingSpaceMetrics(item, fontMeasurement.followingSpaceMetrics).width - getSegmentMetrics(item, cache).width - spaceWidth
+    return getFollowingSpaceMetrics(item, fontMeasurement).width - getSegmentMetrics(item, fontMeasurement).width - spaceWidth
   }
 
   // WebKit splits text items where resolved bidi levels change before it
@@ -376,33 +376,21 @@ function measureAnalysis(
     const nextKind = analysis.kinds[next]!
     if (nextKind !== 'text') return 0
     const after = analysis.texts[next]!
-    const joined = before + after
-    const apart =
-      getCorrectedSegmentWidth(before, previousJoinableMetrics!, emojiCorrection) +
-      getCorrectedSegmentWidth(after, getSegmentMetrics(after, cache), emojiCorrection)
-    const together = getCorrectedSegmentWidth(joined, getSegmentMetrics(joined, cache), emojiCorrection)
+    const apart = getCorrectedSegmentWidth(before, previousJoinableMetrics!, emojiCorrection) + getTextWidth(after, fontMeasurement, emojiCorrection)
+    const together = getTextWidth(before + after, fontMeasurement, emojiCorrection)
     return apart - together > engineProfile.lineFitEpsilon ? apart - together : 0
   }
 
-  function getEntryGeometry(
-    text: string,
-    metrics: SegmentMetrics,
-    advances: number[],
-    width: number,
-    fitBasis: 'fresh' | 'original',
-  ): SegmentEntryGeometry | null {
-    // The cache owner fixes the text and font, and Pretext sets no other context state.
-    const cached = metrics.entryGeometry
-    if (cached !== undefined && cached.letterSpacing === letterSpacing &&
-      cached.advances === advances && cached.emojiCorrection === emojiCorrection) return cached.geometry
-    let complete = true
-    const geometry = observeSegmentEntries(text, advances, letterSpacing, width, fitBasis, source => {
-      const measured = measureWithLetterSpacing(source, letterSpacing, emojiCorrection)
-      if (measured === null) complete = false
-      return measured
-    })
-    // Replacing this last successful observation leaves prepared copies intact.
-    if (geometry !== null && complete) metrics.entryGeometry = { letterSpacing, advances, emojiCorrection, geometry }
+  function getEntryGeometry(text: string, fit: SegmentFit, width: number, fitBasis: 'fresh' | 'original'): SegmentEntryGeometry | null {
+    // The fit fixes the text, font and advances, and Pretext sets no other context state.
+    // Only the WebKit profile moves the advances by a following space, and it observes
+    // no entries.
+    const cached = fit.entryGeometry
+    if (cached !== null && cached.letterSpacing === letterSpacing && cached.emojiCorrection === emojiCorrection) return cached.geometry
+    const geometry = observeSegmentEntries(text, fit.advances!, letterSpacing, width, fitBasis,
+      source => measureWithLetterSpacing(source, letterSpacing, emojiCorrection, fontMeasurement))
+    // Replacing this last observation leaves prepared copies intact.
+    if (geometry !== null) fit.entryGeometry = { letterSpacing, emojiCorrection, geometry }
     return geometry
   }
 
@@ -473,15 +461,16 @@ function measureAnalysis(
       } else if (textMetrics.width >= engineProfile.prefixFitMinWidth) {
         fitMode = 'segment-prefixes'
       }
-      let fitAdvances = getSegmentBreakableFitAdvances(
+      const fit = getSegmentFit(
         text,
         textMetrics,
-        cache,
+        fontMeasurement,
         emojiCorrection,
         fitMode,
         measuredWithSpace ? spaceWidth : null,
         engineProfile.lineBreakScan === 'webkit',
       )
+      let fitAdvances = fit.advances
       // The cached advances are shared by every occurrence of this text; only
       // the final grapheme touches the following space.
       if (followingSpaceKerning !== 0 && fitAdvances !== null) {
@@ -495,8 +484,8 @@ function measureAnalysis(
         fitAdvances,
         spacingGraphemeCount,
         engineProfile.entryFitBasis !== 'disabled' && kind === 'text' && fitAdvances !== null
-          ? getEntryGeometry(text, textMetrics, fitAdvances, width, engineProfile.entryFitBasis) : null,
-        keepsLineStartPunctuation && fitAdvances !== null ? textMetrics.lineStartProhibitions! : null,
+          ? getEntryGeometry(text, fit, width, engineProfile.entryFitBasis) : null,
+        keepsLineStartPunctuation && fitAdvances !== null ? fit.lineStartProhibitions : null,
       )
       return
     }
@@ -546,7 +535,7 @@ function measureAnalysis(
     }
 
     if (segKind === 'control') {
-      const width = getCorrectedSegmentWidth(segText, getSegmentMetrics(segText, cache), emojiCorrection)
+      const width = getTextWidth(segText, fontMeasurement, emojiCorrection)
       // NEL shares a WebKit text item with the text before it and with
       // combining marks after it, and the complex text path spaces it. Complex
       // text shares the item only when its direction matches the page's, which
@@ -571,11 +560,9 @@ function measureAnalysis(
     // takes no letter spacing of its own.
     const markContext = getMarkContext(mi)
     if (markContext !== null) {
-      const joined = markContext + segText
       const width = engineProfile.shapesMarksAcrossSoftHyphen && analysis.texts[mi - 1] === '\u00AD' && nonspacingMarkRunRe.test(segText)
         ? 0
-        : getCorrectedSegmentWidth(joined, getSegmentMetrics(joined, cache), emojiCorrection) -
-          getCorrectedSegmentWidth(markContext, getSegmentMetrics(markContext, cache), emojiCorrection)
+        : getTextWidth(markContext + segText, fontMeasurement, emojiCorrection) - getTextWidth(markContext, fontMeasurement, emojiCorrection)
       pushMeasuredSegment(segText, width, segKind, null, 0)
       continue
     }
@@ -607,7 +594,7 @@ function measureAnalysis(
   }
   let lineEndTrims = hanKerning.lineEndTrims
   if (engineProfile.hangsIdeographicSpace && analysis.normalized.includes('\u3000')) {
-    lineEndTrims = addIdeographicSpaceHangs(lineEndTrims, analysis.texts, analysis.kinds, breaksBefore, cache, letterSpacing, discretionaryHyphenWidth)
+    lineEndTrims = addIdeographicSpaceHangs(lineEndTrims, analysis.texts, analysis.kinds, breaksBefore, fontMeasurement, letterSpacing, discretionaryHyphenWidth)
   }
   const prepared = {
     widths,
@@ -649,7 +636,7 @@ function addIdeographicSpaceHangs(
   texts: readonly string[],
   kinds: readonly SegmentBreakKind[],
   breaksBefore: readonly boolean[] | null,
-  cache: Map<string, SegmentMetrics>,
+  measurement: FontMeasurement,
   letterSpacing: number,
   hyphenWidth: number,
 ): number[] | null {
@@ -663,7 +650,7 @@ function addIdeographicSpaceHangs(
     const run = text.slice(start)
     const previous = i > 0 ? texts[i - 1]! : ''
     const afterSoftHyphen = start === 0 && previous.charCodeAt(previous.length - 1) === 0xAD
-    const hang = getSegmentMetrics(run, cache).width + run.length * letterSpacing - (afterSoftHyphen ? hyphenWidth : 0)
+    const hang = getSegmentMetrics(run, measurement).width + run.length * letterSpacing - (afterSoftHyphen ? hyphenWidth : 0)
     if (hang <= 0) continue
     trims ??= Array.from({ length: texts.length }, () => 0)
     trims[i] = trims[i]! + hang
@@ -679,11 +666,11 @@ function prepareInternal(
 ): InternalPreparedText | PreparedTextWithSegments {
   const wordBreak = options?.wordBreak ?? 'normal'
   const letterSpacing = readLetterSpacing(options?.letterSpacing)
-  // One page-language read: break rules and measurement both follow it.
-  const documentLanguage = getDocumentLanguage()
   const engineProfile = getEngineProfile()
-  const analysis = analyzeText(text, engineProfile, options?.whiteSpace, wordBreak, documentLanguage)
-  return measureAnalysis(analysis, font, includeSegments, letterSpacing, engineProfile, documentLanguage)
+  // One language read: break rules and measurement both follow it.
+  const language = getPreparationLanguage(engineProfile)
+  const analysis = analyzeText(text, engineProfile, options?.whiteSpace, wordBreak, language)
+  return measureAnalysis(analysis, font, includeSegments, letterSpacing, engineProfile, language)
 }
 
 // Prepare text for layout. Segments the text, measures each segment via canvas,

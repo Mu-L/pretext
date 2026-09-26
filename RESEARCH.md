@@ -240,7 +240,8 @@ without a language the scan takes Intl's default. The page also resolves fonts a
 types HanKerning's punctuation under that locale, where Canvas under an empty page
 language doesn't: under a zh-CN UI, `16px "PingFang TC"` halts the `。` of `。」` in the
 page and not in such a Canvas. So the Chromium profile gives its context that locale
-on a page without a language. ENGINE_FOLLOWUPS.md lists the deliberate differences.
+on a page without a language, resolved once per prepare for the scan and the context
+alike. ENGINE_FOLLOWUPS.md lists the deliberate differences.
 
 ## Grapheme Clusters From Engine Data
 

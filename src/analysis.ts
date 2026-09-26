@@ -284,8 +284,9 @@ export function analyzeText(
   profile: AnalysisProfile,
   whiteSpace: WhiteSpaceMode = 'normal',
   wordBreak: WordBreakMode = 'normal',
-  // The page language, which picks Chrome's and WebKit's line tables, WebKit's
-  // quotation remap and Gecko's rule for newlines next to East Asian punctuation.
+  // Preparation's language (getPreparationLanguage), which picks Chrome's and WebKit's
+  // line tables, WebKit's quotation remap and Gecko's rule for newlines next to East
+  // Asian punctuation.
   language: string | null = null,
 ): TextAnalysis {
   const preserve = whiteSpace === 'pre-wrap'

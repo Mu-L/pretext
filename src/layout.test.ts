@@ -34,7 +34,9 @@ let countPreparedLines: LineBreakModule['countPreparedLines']
 let stepPreparedLineGeometry: LineBreakModule['stepPreparedLineGeometry']
 let walkPreparedLinesRaw: LineBreakModule['walkPreparedLinesRaw']
 let SPACED: LineBreakModule['SPACED']
-let getSegmentBreakableFitAdvances: MeasurementModule['getSegmentBreakableFitAdvances']
+let getSegmentFit: MeasurementModule['getSegmentFit']
+let getFontMeasurement: MeasurementModule['getFontMeasurement']
+let getPreparationLanguage: MeasurementModule['getPreparationLanguage']
 let getEngineProfile: MeasurementModule['getEngineProfile']
 let analyzeText: AnalysisModule['analyzeText']
 let getBlinkLineBreaks: LineBreaksModule['getBlinkLineBreaks']
@@ -263,7 +265,7 @@ beforeAll(async () => {
     clearCache,
   } = mod)
   ;({ countPreparedLines, stepPreparedLineGeometry, walkPreparedLinesRaw, SPACED } = lineBreakMod)
-  ;({ getSegmentBreakableFitAdvances, getEngineProfile } = measurementMod)
+  ;({ getSegmentFit, getFontMeasurement, getPreparationLanguage, getEngineProfile } = measurementMod)
   ;({ analyzeText } = analysisMod)
   ;({ getBlinkLineBreaks } = lineBreaksMod)
   ;({ prepareRichInline, layoutNextRichInlineLineRange, materializeRichInlineLineRange, measureRichInlineStats, walkRichInlineLineRanges } = richInlineMod)
@@ -1347,9 +1349,13 @@ describe('engine break scans', () => {
       expect(positions(getBlinkLineBreaks(text, false, null))).toEqual([...root])
       expect(positions(getBlinkLineBreaks(text, false, 'ja'))).toEqual([...root])
       expect(positions(getBlinkLineBreaks(text, false, 'zh-Hant'))).toEqual([...zh])
-      // A page without a language follows Chrome's UI language, which Intl shows as its default.
-      const uiIsChinese = new Intl.DateTimeFormat().resolvedOptions().locale.toLowerCase().startsWith('zh')
-      expect(positions(getBlinkLineBreaks(text, false, ''))).toEqual([...(uiIsChinese ? zh : root)])
+      // A page without a language follows Chrome's UI language, which Intl shows as its
+      // default and preparation gives the scan.
+      const locale = new Intl.DateTimeFormat().resolvedOptions().locale
+      setLocale('')
+      expect(getPreparationLanguage(getEngineProfile())).toBe(locale)
+      setLocale()
+      expect(positions(getBlinkLineBreaks(text, false, locale))).toEqual([...(locale.toLowerCase().startsWith('zh') ? zh : root)])
     }
   })
 
@@ -1572,20 +1578,17 @@ describe('measurement invariants', () => {
   })
 
   test('breakable fit cache distinguishes fit modes', () => {
-    const metrics: SegmentMetrics = { width: 80 }
-    const cache = new Map<string, SegmentMetrics>([
-      ['a', { width: 10 }],
-      ['b', { width: 20 }],
-      ['c', { width: 30 }],
-      ['ab', { width: 35 }],
-      ['bc', { width: 60 }],
-      ['abc', metrics],
-    ])
+    const measurement = getFontMeasurement('16px Fit Mode Test', null)
+    const metrics: SegmentMetrics = { width: 80, emojiCount: -1, fit: null }
+    for (const [text, width] of [['a', 10], ['b', 20], ['c', 30], ['ab', 35], ['bc', 60]] as const) {
+      measurement.metrics.set(text, { width, emojiCount: -1, fit: null })
+    }
+    measurement.metrics.set('abc', metrics)
 
-    expect(getSegmentBreakableFitAdvances('abc', metrics, cache, 0, 'sum-graphemes')).toEqual([10, 20, 30])
-    expect(getSegmentBreakableFitAdvances('abc', metrics, cache, 0, 'pair-context')).toEqual([10, 25, 40])
-    expect(getSegmentBreakableFitAdvances('abc', metrics, cache, 0, 'segment-prefixes')).toEqual([10, 25, 45])
-    expect(getSegmentBreakableFitAdvances('abc', metrics, cache, 0, 'sum-graphemes')).toEqual([10, 20, 30])
+    expect(getSegmentFit('abc', metrics, measurement, 0, 'sum-graphemes').advances).toEqual([10, 20, 30])
+    expect(getSegmentFit('abc', metrics, measurement, 0, 'pair-context').advances).toEqual([10, 25, 40])
+    expect(getSegmentFit('abc', metrics, measurement, 0, 'segment-prefixes').advances).toEqual([10, 25, 45])
+    expect(getSegmentFit('abc', metrics, measurement, 0, 'sum-graphemes').advances).toEqual([10, 20, 30])
   })
 
   test('the emoji correction counts U+FE0F only after an emoji character', () => {

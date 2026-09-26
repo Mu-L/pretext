@@ -25,8 +25,8 @@
 // - Blink restarts ICU at each line start, which drops the context before the line
 //   (tbi.h:159-163, tbi_icu.cc:771-810). These scans read each text once.
 // - Chrome opens line_normal_cj.brk for zh content, and for content without a language
-//   under a Chinese UI. The scan takes the page language, and on a page without one the
-//   language V8 shows as its default locale, which is Chrome's UI language (getBlinkLineBreaks).
+//   under a Chinese UI. The scan takes preparation's language, which on a page without one
+//   is the language V8 shows as its default locale, Chrome's UI language (getBlinkLineBreaks).
 //   Content-Language headers and an element's own lang aren't read.
 // - WebKit splits items where bidi levels change (IIB:637-775), and swaps a Han-script
 //   locale for the user's first Chinese language (FontDescription.cpp:74-83, 107-113).
@@ -469,15 +469,15 @@ function shouldKeepAfterKeepAll(rules: BreakRules, lastLast: number, last: numbe
 // --lang, which is Chrome's UI language (tbi_icu.cc:71-75, text_break_iterator_internal_icu.cc:31-45,
 // platform/language.cc:94-99). Chrome also makes it the renderer's ICU default locale, which
 // V8's Intl reads (ui/base/l10n/l10n_util.cc:392-398, chrome/app/chrome_main_delegate.cc:1474-1476),
-// so the page reads it from Intl; navigator.language follows the accept languages instead.
-// Without a document the scan reads root.
+// so preparation gives the scan that language from Intl for a page without one
+// (getPreparationLanguage in src/measurement.ts); navigator.language follows the accept
+// languages instead. Without a document the scan reads root.
 export function getBlinkLineBreaks(text: string, keepAll: boolean, language: string | null): Uint8Array {
   const length = text.length
   const breaks = new Uint8Array(length + 1)
   if (length < 2) return breaks
   const pairs = blinkPairs ??= unpackTable(blinkLinePairsPacked)
-  const locale = language === '' ? getBlinkDefaultLocale() : language
-  const table: ChromiumLineTable = getBreakLanguage(locale) === 'zh' ? 'line_normal_cj' : 'line_normal'
+  const table: ChromiumLineTable = getBreakLanguage(language) === 'zh' ? 'line_normal_cj' : 'line_normal'
   const rules = getLineRules(`chromium/${table}`)
   let icu: Uint8Array | null = null
   let lastLast = 0
